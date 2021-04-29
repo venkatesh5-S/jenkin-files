@@ -1,0 +1,58 @@
+def label = "projectname-${UUID.randomUUID().toString()}"
+
+podTemplate(label: label, containers: [
+    containerTemplate(name: 'docker', image: 'docker', command: 'cat', ttyEnabled: true),
+    containerTemplate(name: 'git', image: 'alpine/git', ttyEnabled: true, command: 'cat'),
+    containerTemplate(name: 'terragrunt', image: 'alpine/terragrunt:latest', ttyEnabled: true, command: 'cat'),
+    containerTemplate(name: 'ansible', image: 'suhasulun/devops:ansible', command: 'cat', ttyEnabled: true),
+  ],
+  volumes: [
+    hostPathVolume(mountPath: '/var/run/docker.sock', hostPath: '/var/run/docker.sock'),
+  ]
+  ) {
+    node(label) {
+        stage('Check running containers') {
+            container('docker') {
+                // example to show you can run docker commands when you mount the socket
+                sh 'hostname'
+                sh 'hostname -i'
+                sh 'docker ps'
+            }
+        }
+        
+        stage('Clone repository') {
+            container('git') {
+                sh 'whoami'
+                sh 'hostname -i'
+                sh 'git clone -b master https://github.com/suhasulun/sqlcluster=automation.git'
+            }
+        }
+
+        stage('Setup Infrastructure') {
+            container('terragrunt') {
+                dir('terraform/') {
+                    sh 'terragrunt get && terragrunt init'
+                    sh 'terragrunt plan'
+                    sh 'terragrunt apply'
+                }
+            }
+        }
+      
+        stage('Join Domain and Configure Windows Servers') {
+            container('ansible') {
+                dir('ansible/') {
+                    sh 'ansible-playbook -i hosts -vv domain.role'
+                }
+            }
+        }
+      
+        stage('Configure and Enable SQL Clustering') {
+            container('ansible') {
+                dir('ansible/') {
+                  sh 'ansible-playbook -i hosts -v -e env=${params.environment} main.yml'
+                }
+            }
+        }
+        
+    }
+}
